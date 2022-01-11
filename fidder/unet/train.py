@@ -202,7 +202,7 @@ def training_loop(
                                                          f" {loss.item():.4f}")
 
             # Evaluation round
-            val_score = validate(model, val_loader, device, progress_tracker=progress_tracker)
+            val_score = validate(model, val_loader, device)
             scheduler.step(val_score)
 
             console.log(f'Training loss: {loss:.4f}')
