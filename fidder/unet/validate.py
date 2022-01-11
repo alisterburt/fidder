@@ -11,8 +11,14 @@ def validate(model, dataloader, device):
     dice_score = 0
 
     # iterate over the validation set
-    for batch in tqdm(dataloader, total=num_val_batches, desc='Validation round', unit='batch',
-                      leave=False):
+    # with Progress(
+    #         "[progress.description]{task.description} {task.completed:} / {task.total}",
+    #         BarColumn(),
+    #         "[progress.percentage]{task.percentage:>3.0f}%",
+    #         TimeRemainingColumn(),
+    #         console=console
+    # ) as progress_tracker:
+    for batch in dataloader:
         image, mask_true = batch['image'], batch['mask']
 
         # move images and labels to correct device and type

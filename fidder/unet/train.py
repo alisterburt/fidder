@@ -2,15 +2,14 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
+import einops
 import torch
 import torch.nn.functional as F
 import typer
-import wandb
 from rich.console import Console
-from rich.progress import Progress
+from rich.progress import Progress, BarColumn
 from torch import optim
 from torch.utils.data import DataLoader, random_split
-from tqdm import tqdm
 
 from fidder.dataset import FidderDataSet
 from fidder.unet.model import UNet
@@ -150,84 +149,72 @@ def training_loop(
         scheduler: optim.lr_scheduler.ReduceLROnPlateau,
         grad_scaler: torch.cuda.amp.GradScaler,
         mixed_precision: bool):
-    n_train = len(train_loader)
     global_step = 0
 
-    progress_tracker = Progress()
-    epoch_pbar = progress_tracker.add_task("[cyan]Epoch: ", total=epochs)
+    with Progress(
+            "[progress.description]{task.description} {task.completed:>3.0f}  / {task.total:>3.0f}",
+            BarColumn(),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            "[progress.loss]{task.fields[loss]}",
+            console=console
+    ) as progress_tracker:
+        epoch_pbar = progress_tracker.add_task(
+            f"[magenta]Epoch",
+            total=epochs,
+            loss=f"Validation Dice score: "
+        )
+        loss = 99999
+        for epoch in range(epochs):
+            model.train()
+            epoch_loss = 0
+            batch_pbar = progress_tracker.add_task("[green]Image", total=len(
+                train_loader.dataset), loss=f"         Running loss: {loss:.4f}")
 
-    for epoch in range(epochs):
-        model.train()
-        epoch_loss = 0
-        for batch in train_loader:
-            images, true_masks = batch['image'], batch['mask']
+            for batch in train_loader:
+                images, true_masks = batch['image'], batch['mask']
 
-            images = images.to(device=device, dtype=torch.float32)
-            true_masks = true_masks.to(device=device, dtype=torch.long)
-            true_masks_one_hot = F.one_hot(true_masks, model.n_classes).permute(0, 3, 1,
-                                                                                2).float()
+                images = images.to(device=device, dtype=torch.float32)
+                true_masks = true_masks.to(device=device, dtype=torch.long)
+                true_masks_one_hot = einops.rearrange(
+                    F.one_hot(true_masks, model.n_classes), 'b h w c -> b c h w'
+                ).float()
 
-            with torch.cuda.amp.autocast(enabled=mixed_precision):
-                masks_pred = model(images)  # (b, c, h, w)
-                normalised_predictions = F.softmax(masks_pred, dim=1).float()
+                with torch.cuda.amp.autocast(enabled=mixed_precision):
+                    masks_pred = model(images)  # (b, c, h, w)
+                    normalised_predictions = F.softmax(masks_pred, dim=1).float()
 
-                cross_entropy_loss_value = F.cross_entropy(masks_pred, true_masks)
-                dice_loss_value = dice_loss(
-                    normalised_predictions, true_masks_one_hot, multiclass=True
-                )
+                    cross_entropy_loss_value = F.cross_entropy(masks_pred, true_masks)
+                    dice_loss_value = dice_loss(
+                        normalised_predictions, true_masks_one_hot, multiclass=True
+                    )
 
-                loss = cross_entropy_loss_value + dice_loss_value
+                    loss = cross_entropy_loss_value + dice_loss_value
 
-            optimizer.zero_grad(set_to_none=True)
-            grad_scaler.scale(loss).backward()
-            grad_scaler.step(optimizer)
-            grad_scaler.update()
+                optimizer.zero_grad(set_to_none=True)
+                grad_scaler.scale(loss).backward()
+                grad_scaler.step(optimizer)
+                grad_scaler.update()
 
-            # pbar.update(images.shape[0])
-            global_step += 1
-            epoch_loss += loss.item()
-            # experiment.log({
-            #     'train loss': loss.item(),
-            #     'step': global_step,
-            #     'epoch': epoch
-            # })
-            # pbar.set_postfix(**{'loss (batch)': loss.item()})
+                progress_tracker.update(batch_pbar, advance=images.shape[0])
+                global_step += 1
+                epoch_loss += loss.item()
+                progress_tracker.update(batch_pbar, loss=f"         Running loss:"
+                                                         f" {loss.item():.4f}")
 
             # Evaluation round
-            batch_size = len(images)
-            division_step = (n_train // (10 * batch_size))
-            if division_step > 0:
-                if global_step % division_step == 0:
-                    histograms = {}
-                    for tag, value in model.named_parameters():
-                        tag = tag.replace('/', '.')
-                        histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
-                        histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
+            val_score = validate(model, val_loader, device)
+            scheduler.step(val_score)
 
-                    val_score = validate(model, val_loader, device)
-                    scheduler.step(val_score)
+            console.log(f'Training loss: {loss:.4f}')
+            console.log(f'Validation Dice score: {val_score:.4f}')
+            progress_tracker.update(batch_pbar, visible=False)
+            progress_tracker.update(epoch_pbar, advance=1, loss=f"Validation Dice score: "
+                                                                f"{val_score:.4f}")
 
-                    console.log(f'Validation Dice score: {val_score}')
-                    # experiment.log({
-                    #     'learning rate': optimizer.param_groups[0]['lr'],
-                    #     'validation Dice': val_score,
-                    #     'images': wandb.Image(images[0].cpu()),
-                    #     'masks': {
-                    #         'true': wandb.Image(true_masks[0].float().cpu()),
-                    #         'pred': wandb.Image(torch.softmax(masks_pred, dim=1).argmax(dim=1)[
-                    #                                 0].float().cpu()),
-                    #     },
-                    #     'step': global_step,
-                    #     'epoch': epoch,
-                    #     **histograms
-                    # })
-
-            progress_tracker.update(epoch_pbar, advance=1)
-
-        # Save model checkpoints between epochs
-        if save_checkpoint:
-            checkpoint_file = checkpoint_directory / f'checkpoint_epoch_{epoch + 1}.pth'
-            torch.save(model.state_dict(), str(checkpoint_file))
-            console.log(f'Checkpoint {epoch + 1} saved!')
+            # Save model checkpoints between epochs
+            if save_checkpoint:
+                checkpoint_file = checkpoint_directory / f'checkpoint_epoch_{epoch + 1}.pth'
+                torch.save(model.state_dict(), str(checkpoint_file))
+                console.log(f'Checkpoint for epoch {epoch + 1} saved')
 
     return model
