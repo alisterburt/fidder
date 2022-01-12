@@ -10,6 +10,9 @@ import torchvision.transforms as T
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as TF
 
+DOWNSAMPLE_SHORT_EDGE_LENGTH = 1024
+NETWORK_IMAGE_DIMENSIONS = (512, 512)
+
 
 class FidderDataSet(Dataset):
     """Fiducial mask dataset.
@@ -25,7 +28,6 @@ class FidderDataSet(Dataset):
         self.root_dir = Path(root_dir)
         self.image_dir = self.root_dir / 'images'
         self.mask_dir = self.root_dir / 'masks'
-        self.image_shape = (512, 512)
 
         # basic check only
         if len(self.image_files) != len(self.mask_files):
@@ -77,7 +79,7 @@ class FidderDataSet(Dataset):
         mask = einops.rearrange(mask, 'h w -> 1 h w')
 
         # simple resize of short edge to 1024px
-        image, mask = self.resize(image, mask, size=1024)
+        image, mask = self.resize(image, mask, size=DOWNSAMPLE_SHORT_EDGE_LENGTH)
 
         # augment if training, random crop if validating
         if self.is_training:
@@ -102,14 +104,18 @@ class FidderDataSet(Dataset):
 
     def augment(self, *images):
         # input images have a short edge length 1024
-        target_area = np.prod(self.image_shape)
+        target_area = np.prod(NETWORK_IMAGE_DIMENSIONS)
         image_area = np.prod(images[0].shape)
         target_scale = target_area / image_area
         crop_parameters = T.RandomResizedCrop.get_params(
             images[0], scale=[0.75 * target_scale, 1.33 * target_scale], ratio=[1, 1])
 
         images = [TF.crop(image, *crop_parameters) for image in images]
-        images = [TF.resize(image, size=self.image_shape) for image in images]
+        images = [
+            TF.resize(image, size=NETWORK_IMAGE_DIMENSIONS)
+            for image
+            in images
+        ]
 
         # random flips
         if np.random.uniform(low=0, high=1) > 0.5:
@@ -120,5 +126,7 @@ class FidderDataSet(Dataset):
         return images
 
     def random_crop(self, *images):
-        crop_parameters = T.RandomCrop.get_params(images[0], output_size=self.image_shape)
+        crop_parameters = T.RandomCrop.get_params(
+            images[0], output_size=NETWORK_IMAGE_DIMENSIONS
+        )
         return [TF.crop(image, *crop_parameters) for image in images]
