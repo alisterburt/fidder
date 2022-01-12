@@ -81,7 +81,7 @@ class FidderDataSet(Dataset):
 
         # augment if training, random crop if validating
         if self.is_training:
-            image, mask = self.transform(image, mask)
+            image, mask = self.augment(image, mask)
         else:
             image, mask = self.random_crop(image, mask)
 
@@ -100,7 +100,7 @@ class FidderDataSet(Dataset):
     def resize(self, *images, size: int):
         return [TF.resize(image, size) for image in images]
 
-    def transform(self, *images):
+    def augment(self, *images):
         # input images have a short edge length 1024
         target_area = np.prod(self.image_shape)
         image_area = np.prod(images[0].shape)

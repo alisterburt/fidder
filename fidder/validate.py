@@ -2,7 +2,7 @@ import einops
 import torch
 import torch.nn.functional as F
 
-from .utils.dice_score import multiclass_dice_coeff, dice_coeff
+from fidder.unet.utils.dice_score import multiclass_dice_coeff, dice_coeff
 
 
 def validate(model, dataloader, device):

@@ -13,8 +13,8 @@ from torch.utils.data import DataLoader, random_split
 
 from fidder.dataset import FidderDataSet
 from fidder.unet.model import UNet
-from fidder.unet.validate import validate
-from .utils.dice_score import dice_loss
+from fidder.validate import validate
+from fidder.unet.utils.dice_score import dice_loss
 
 DEFAULT_TRAINING_DATA_DIR = Path('training_data')
 DEFAULT_OUTPUT_DIR = Path('output')
