@@ -41,6 +41,7 @@ def train_unet(
         mixed_precision: bool = typer.Option(False, **option_args)
 ):
     # 1. Create output folder structure
+    output_directory = Path(output_directory)
     model_file = output_directory / MODEL_NAME
     log_file = output_directory / LOG_FILE_NAME
     checkpoint_directory = output_directory / CHECKPOINT_DIR_NAME
