@@ -8,6 +8,7 @@ from tiler import Tiler, Merger
 import einops
 import mrcfile
 from .unet.model import UNet
+import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 
 from .dataset import NETWORK_IMAGE_DIMENSIONS, DOWNSAMPLE_SHORT_EDGE_LENGTH
@@ -23,7 +24,7 @@ def load_predict_save(
         tilt_series: Path = typer.Option(..., **option_args),
         model_weights: Path = typer.Option(..., **option_args),
         output_filename: Path = typer.Option(..., **option_args),
-        batch_size: int = 4,
+        batch_size: int = 3,
 ):
     model = UNet(n_channels=1, n_classes=2, bilinear=True)
     console.log(f'Network:\n'
@@ -44,15 +45,27 @@ def load_predict_save(
     with mrcfile.open(tilt_series, permissive=True) as mrc:
         tilt_series_data = torch.tensor(mrc.data)
 
-    fiducial_mask = predict_tilt_series(
+    fiducial_probabilities = predict_tilt_series(
         tilt_series=tilt_series_data,
         model=model,
         device=device,
         batch_size=batch_size
     )
-    fiducial_mask = np.array(fiducial_mask.cpu(), dtype=np.int16)
-    mrcfile.new(output_filename, data=np.array(fiducial_mask.cpu(), dtype=np.int16,)).close()
-    return fiducial_mask
+    fiducial_probabilities = np.asarray(fiducial_probabilities, dtype=np.float16)
+    fiducial_mask = fiducial_probabilities > 0.3
+    mrcfile.new(output_filename, data=np.array(fiducial_mask, dtype=np.int16),
+                overwrite=True).close()
+    return fiducial_probabilities
+
+
+def predict_tilt_series(tilt_series: torch.Tensor, model, device: torch.device, batch_size=10):
+    tilt_series_probabilities = torch.zeros(size=tilt_series.shape, dtype=torch.float16)
+    for idx, tilt_image in enumerate(tilt_series):
+        tilt_image_probabilities = predict_single_image(
+            tilt_image, model=model, device=device, batch_size=batch_size
+        )
+        tilt_series_probabilities[idx, ...] = tilt_image_probabilities
+    return tilt_series_probabilities
 
 
 def predict_single_image(
@@ -89,13 +102,16 @@ def predict_single_image(
 
         # predict
         predicted_masks = model(tiles)
-        predicted_masks = torch.argmax(predicted_masks, dim=1)
-        predicted_masks = np.array(predicted_masks.cpu(), dtype=bool)
+        fiducial_probabilities = F.softmax(predicted_masks, dim=1)[:, 1, ...].cpu()
+        fiducial_probabilities = np.array(fiducial_probabilities.detach(), dtype=np.float16)
+
+        # add to merger for tile merging
         merger.add_batch(
-            data=predicted_masks,
+            data=fiducial_probabilities,
             batch_id=batch_idx,
             batch_size=batch_size,
         )
+
     merged_tiles = torch.tensor(merger.merge(unpad=True))
     merged_tiles = einops.rearrange(merged_tiles, 'h w -> 1 1 h w')
     mask = TF.resize(merged_tiles, size=original_image_dimensions)
@@ -103,13 +119,5 @@ def predict_single_image(
     return mask
 
 
-def predict_tilt_series(tilt_series: torch.Tensor, model, device: torch.device, batch_size=10):
-    tilt_series_mask = torch.zeros(size=tilt_series.shape, dtype=torch.bool)
-    for idx, tilt_image in enumerate(tilt_series):
-        tilt_image_mask = predict_single_image(
-            tilt_image, model=model, device=device, batch_size=batch_size
-        )
-        tilt_series_mask[idx, ...] = tilt_image_mask
-    return tilt_series_mask
 
 
