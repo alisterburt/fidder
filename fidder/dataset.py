@@ -82,10 +82,10 @@ class FidderDataSet(Dataset):
         image, mask = self.resize(image, mask, size=DOWNSAMPLE_SHORT_EDGE_LENGTH)
 
         # augment if training, random crop if validating
-        if self.is_training:
-            image, mask = self.augment(image, mask)
-        else:
-            image, mask = self.random_crop(image, mask)
+        # if self.is_training:
+        #     image, mask = self.augment(image, mask)
+        # else:
+        #     image, mask = self.random_crop(image, mask)
 
         # normalise image
         image = (image - torch.mean(image)) / torch.std(image)
