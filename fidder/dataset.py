@@ -10,7 +10,7 @@ import torchvision.transforms as T
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as TF
 
-DOWNSAMPLE_SHORT_EDGE_LENGTH = 512
+DOWNSAMPLE_SHORT_EDGE_LENGTH = 1024
 NETWORK_IMAGE_DIMENSIONS = (512, 512)
 
 
