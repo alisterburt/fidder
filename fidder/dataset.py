@@ -10,7 +10,7 @@ import torchvision.transforms as T
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as TF
 
-DOWNSAMPLE_SHORT_EDGE_LENGTH = 1024
+DOWNSAMPLE_SHORT_EDGE_LENGTH = 512
 NETWORK_IMAGE_DIMENSIONS = (512, 512)
 
 
@@ -82,8 +82,8 @@ class FidderDataSet(Dataset):
         image, mask = self.resize(image, mask, size=DOWNSAMPLE_SHORT_EDGE_LENGTH)
 
         # augment if training, random crop if validating
-        # if self.is_training:
-        #     image, mask = self.augment(image, mask)
+        if self.is_training:
+            image, mask = self.augment(image, mask)
         # else:
         #     image, mask = self.random_crop(image, mask)
 
@@ -104,18 +104,18 @@ class FidderDataSet(Dataset):
 
     def augment(self, *images):
         # input images have a short edge length 1024
-        target_area = np.prod(NETWORK_IMAGE_DIMENSIONS)
-        image_area = np.prod(images[0].shape)
-        target_scale = target_area / image_area
-        crop_parameters = T.RandomResizedCrop.get_params(
-            images[0], scale=[0.75 * target_scale, 1.33 * target_scale], ratio=[1, 1])
-
-        images = [TF.crop(image, *crop_parameters) for image in images]
-        images = [
-            TF.resize(image, size=NETWORK_IMAGE_DIMENSIONS)
-            for image
-            in images
-        ]
+        # target_area = np.prod(NETWORK_IMAGE_DIMENSIONS)
+        # image_area = np.prod(images[0].shape)
+        # target_scale = target_area / image_area
+        # crop_parameters = T.RandomResizedCrop.get_params(
+        #     images[0], scale=[0.75 * target_scale, 1.33 * target_scale], ratio=[1, 1])
+        #
+        # images = [TF.crop(image, *crop_parameters) for image in images]
+        # images = [
+        #     TF.resize(image, size=NETWORK_IMAGE_DIMENSIONS)
+        #     for image
+        #     in images
+        # ]
 
         # random flips
         if np.random.uniform(low=0, high=1) > 0.5:
